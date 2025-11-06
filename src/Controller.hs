@@ -22,19 +22,49 @@ step dt gs
 input :: Event -> GameState -> IO GameState
 input ev gs = pure (inputKey ev gs)
 
+-- Helpers ------------------------------------------------------
+
+resetGame :: GameState -> GameState
+resetGame gs = initialGameState (rng gs) (highScorePath gs)
+
+pointInRect :: (Float, Float) -> (Float, Float, Float, Float) -> Bool
+pointInRect (mx,my) (cx,cy,w,h) =
+  let halfW' = w/2; halfH' = h/2
+  in mx >= cx - halfW' && mx <= cx + halfW' && my >= cy - halfH' && my <= cy + halfH'
+
 -- Input --------------------------------------------------------
 
 inputKey :: Event -> GameState -> GameState
-inputKey (EventKey (SpecialKey KeyUp)   Down _ _) gs = gs { inputY =  1 }
-inputKey (EventKey (SpecialKey KeyDown) Down _ _) gs = gs { inputY = -1 }
-inputKey (EventKey (SpecialKey KeyUp)     Up _ _) gs = gs { inputY =  0 }
-inputKey (EventKey (SpecialKey KeyDown)   Up _ _) gs = gs { inputY =  0 }
-inputKey (EventKey (SpecialKey KeyEnter) Down _ _) gs = gs { paused = not (paused gs) }
+-- vertical movement
+inputKey (EventKey (SpecialKey KeyUp)    Down _ _) gs = gs { inputY =  1 }
+inputKey (EventKey (SpecialKey KeyDown)  Down _ _) gs = gs { inputY = -1 }
+inputKey (EventKey (SpecialKey KeyUp)      Up _ _) gs = gs { inputY =  0 }
+inputKey (EventKey (SpecialKey KeyDown)    Up _ _) gs = gs { inputY =  0 }
+
+-- prevent toggling pause after death
+inputKey (EventKey (SpecialKey KeyEnter) Down _ _) gs
+  | health gs <= 0 = gs
+  | otherwise      = gs { paused = not (paused gs) }
+
+-- hold-to-fire behavior
 inputKey (EventKey (SpecialKey KeySpace) Down _ _) gs =
   let (mb, gs') = tryShoot gs
-  in case mb of
-       Nothing -> gs'
-       Just b  -> gs' { bullets = b : bullets gs' }
+      gs'' = gs' { inputFire = True }
+  in maybe gs'' (\b -> gs'' { bullets = b : bullets gs'' }) mb
+inputKey (EventKey (SpecialKey KeySpace)   Up _ _) gs = gs { inputFire = False }
+
+-- restart with 'r' when game over
+inputKey (EventKey (Char 'r') Down _ _) gs
+  | health gs <= 0 = resetGame gs
+  | otherwise      = gs
+
+-- click restart button on game over
+inputKey (EventKey (MouseButton LeftButton) Down _ (mx,my)) gs
+  | health gs <= 0
+  , pointInRect (mx,my) (0, restartBtnY, restartBtnW, restartBtnH) = resetGame gs
+  | otherwise = gs
+
+-- catch-all
 inputKey _ gs = gs
 
 -- Pure world step ---------------------------------------------
@@ -43,18 +73,24 @@ stepWorld :: Float -> GameState -> GameState
 stepWorld dt gs0 =
   let gs1 = gs0 { timeAccum = timeAccum gs0 + dt }
       gs2 = gs1 { player = stepPlayer dt (inputY gs1) (player gs1) }
-      bs1 = map (stepBullet dt) (bullets gs1)
+
+      (mbShot, gs2b) = if inputFire gs2 then tryShoot gs2 else (Nothing, gs2)
+      bulletsStart   = maybe id (:) mbShot (bullets gs2b)
+
+      bs1 = map (stepBullet dt) bulletsStart
+      trailAdd = map (\b -> BulletTrail (bPos b) 0.22) bs1
+
       bs2 = filter (inBounds . bPos) bs1
-      es1 = map (stepEnemy dt (player gs1)) (enemies gs1)
+      es1 = map (stepEnemy dt (player gs2b)) (enemies gs2b)
       es2 = filter (inBounds . ePos) es1
       (es3, bs3, scDelta, animAdd) = resolveBulletHits es2 bs2
-      (dmg, es4, animAdd2) = resolvePlayerHits (player gs2) es3
-      gs3 = gs2 { enemies = es4
-                , bullets = bs3
-                , anims   = tickAnims dt (anims gs2 ++ animAdd ++ animAdd2)
-                , score   = score gs2 + scDelta
-                , health  = max 0 (health gs2 - dmg)
-                }
+      (dmg, es4, animAdd2) = resolvePlayerHits (player gs2b) es3
+      gs3 = gs2b { enemies = es4
+                 , bullets = bs3
+                 , anims   = tickAnims dt (anims gs2b ++ trailAdd ++ animAdd ++ animAdd2)
+                 , score   = score gs2b + scDelta
+                 , health  = max 0 (health gs2b - dmg)
+                 }
   in spawnEnemies dt gs3
 
 spawnEnemies :: Float -> GameState -> GameState
@@ -94,8 +130,10 @@ inBounds (Position x y) = x > -halfW - 60 && x < halfW + 60 && y > -halfH - 60 &
 tickAnims :: Float -> [Anim] -> [Anim]
 tickAnims dt = foldr step [] where
   step a acc = case a of
-    Explosion p ttl -> let ttl' = ttl - dt in if ttl' > 0 then Explosion p ttl' : acc else acc
-    FlashHUD ttl    -> let ttl' = ttl - dt in if ttl' > 0 then FlashHUD ttl' : acc else acc
+    Explosion p ttl   -> let t = ttl - dt in if t > 0 then Explosion p t   : acc else acc
+    FlashHUD ttl      -> let t = ttl - dt in if t > 0 then FlashHUD t      : acc else acc
+    MuzzleFlash p ttl -> let t = ttl - dt in if t > 0 then MuzzleFlash p t : acc else acc
+    BulletTrail p ttl -> let t = ttl - dt in if t > 0 then BulletTrail p t : acc else acc
 
 -- Shooting -----------------------------------------------------
 
@@ -104,9 +142,10 @@ tryShoot gs
   | pCooldown (player gs) > 0 || health gs <= 0 = (Nothing, gs)
   | otherwise =
       let Position x y = pPos (player gs)
-          b = Bullet (Position (x+20) y) (bulletSpeed, 0)
-          pl' = (player gs) { pCooldown = cooldownSecs }
-      in (Just b, gs { player = pl' })
+          b    = Bullet (Position (x+20) y) (bulletSpeed, 0)
+          pl'  = (player gs) { pCooldown = cooldownSecs }
+          flash = MuzzleFlash (Position (x+24) y) 0.12
+      in (Just b, gs { player = pl', anims = flash : anims gs })
 
 -- AI & spawning ------------------------------------------------
 
@@ -152,23 +191,25 @@ resolveBulletHits :: [Enemy] -> [Bullet] -> ([Enemy], [Bullet], Int, [Anim])
 resolveBulletHits es bs = go es bs 0 [] where
   go [] bs' sc anims' = ([], bs', sc, anims')
   go (e:rest) bs' sc anims' =
-    let (hit, _survivors, bsAfter) = consumeHits e bs'
+    let (hit, bsAfter) = consumeOneHit e bs'
     in if hit
-         then let e' = e { eHP = eHP e - 1 }
-                  (esNext, bsNext, sc', anims'') = go rest bsAfter sc anims'
-                  died = eHP e' <= 0
-                  animsAdd = if died then [Explosion (ePos e) 0.35] else []
-                  scAdd = if died then 10 else 0
-                  esFinal = (if died then esNext else e' : esNext)
-              in (esFinal, bsNext, sc' + scAdd, anims'' ++ animsAdd)
-         else let (esNext, bsNext, sc', anims'') = go rest bs' sc anims'
-              in (e:esNext, bsNext, sc', anims'')
+         then
+           let e' = e { eHP = eHP e - 1 }
+               (esNext, bsNext, sc', anims'') = go rest bsAfter sc anims'
+               died      = eHP e' <= 0
+               animsAdd  = if died then [Explosion (ePos e) 0.35] else []
+               scAdd     = if died then 10 else 0
+               esFinal   = if died then esNext else e' : esNext
+           in (esFinal, bsNext, sc' + scAdd, anims'' ++ animsAdd)
+         else
+           let (esNext, bsNext, sc', anims'') = go rest bs' sc anims'
+           in (e:esNext, bsNext, sc', anims'')
 
-  consumeHits :: Enemy -> [Bullet] -> (Bool, [Bullet], [Bullet])
-  consumeHits enemy = foldr step (False, [], []) where
-    step b (hitAny, kept, removed)
-      | hitCircle (ePos enemy) enemyRadius (bPos b) bulletRadius = (True, kept, b:removed)
-      | otherwise = (hitAny, b:kept, removed)
+  consumeOneHit :: Enemy -> [Bullet] -> (Bool, [Bullet])
+  consumeOneHit enemy bsList =
+    case break (\b -> hitCircle (ePos enemy) enemyRadius (bPos b) bulletRadius) bsList of
+      (left, _hit:right) -> (True, left ++ right)
+      _                  -> (False, bsList)
 
 resolvePlayerHits :: Player -> [Enemy] -> (Int, [Enemy], [Anim])
 resolvePlayerHits pl = foldr step (0, [], []) where

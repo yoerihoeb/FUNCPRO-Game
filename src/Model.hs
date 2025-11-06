@@ -52,8 +52,10 @@ data Bullet = Bullet
   } deriving (Show, Eq)
 
 data Anim =
-    Explosion { aPos :: Position, aTTL :: Float }
-  | FlashHUD  { aTTL :: Float }
+    Explosion   { aPos :: Position, aTTL :: Float }
+  | FlashHUD    { aTTL :: Float }
+  | MuzzleFlash { aPos :: Position, aTTL :: Float }   -- NEW
+  | BulletTrail { aPos :: Position, aTTL :: Float }   -- NEW
   deriving (Show, Eq)
 
 -- Whole world --------------------------------------------------
@@ -71,6 +73,7 @@ data GameState = GameState
   , inputY        :: Float
   , highScorePath :: FilePath
   , gameOverSaved :: Bool
+  , inputFire     :: Bool
   } deriving (Show)
 
 -- Constants ----------------------------------------------------
@@ -96,6 +99,11 @@ cooldownSecs    = 0.18
 enemyBaseSpeed :: Float
 enemyBaseSpeed = 160
 
+restartBtnW, restartBtnH, restartBtnY :: Float
+restartBtnW = 240
+restartBtnH = 64
+restartBtnY = -120
+
 -- Initial state ------------------------------------------------
 initialGameState :: StdGen -> FilePath -> GameState
 initialGameState gen hsPath = GameState
@@ -111,6 +119,7 @@ initialGameState gen hsPath = GameState
   , inputY = 0
   , highScorePath = hsPath
   , gameOverSaved = False
+  , inputFire = False
   }
 
 -- Public constructor used by Main

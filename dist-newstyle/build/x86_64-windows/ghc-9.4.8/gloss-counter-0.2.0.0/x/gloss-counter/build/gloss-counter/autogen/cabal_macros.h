@@ -40,15 +40,15 @@
   (major1) == 1 && (major2) <  13 || \
   (major1) == 1 && (major2) == 13 && (minor) <= 2)
 #endif /* MIN_VERSION_gloss */
-/* package random-1.3.0 */
+/* package random-1.3.1 */
 #ifndef VERSION_random
-#define VERSION_random "1.3.0"
+#define VERSION_random "1.3.1"
 #endif /* VERSION_random */
 #ifndef MIN_VERSION_random
 #define MIN_VERSION_random(major1,major2,minor) (\
   (major1) <  1 || \
   (major1) == 1 && (major2) <  3 || \
-  (major1) == 1 && (major2) == 3 && (minor) <= 0)
+  (major1) == 1 && (major2) == 3 && (minor) <= 1)
 #endif /* MIN_VERSION_random */
 
 /* tool gcc-14.0.6 */
