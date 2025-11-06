@@ -1,11 +1,10 @@
 -- | Time step and input handling, plus core logic
 module Controller where
-
 import Graphics.Gloss.Interface.IO.Game
 import System.Random (StdGen, randomR)
 import qualified System.IO as IO
-
 import Model
+import Data.List (foldl')
 
 -- External API required by the framework ----------------------
 
@@ -31,6 +30,12 @@ pointInRect :: (Float, Float) -> (Float, Float, Float, Float) -> Bool
 pointInRect (mx,my) (cx,cy,w,h) =
   let halfW' = w/2; halfH' = h/2
   in mx >= cx - halfW' && mx <= cx + halfW' && my >= cy - halfH' && my <= cy + halfH'
+
+normScale :: Vec2 -> Float -> Vec2
+normScale (0,0) s = (-s, 0)
+normScale (x,y) s =
+  let l = sqrt (x*x + y*y)
+  in (s*x/l, s*y/l)
 
 -- Input --------------------------------------------------------
 
@@ -74,22 +79,43 @@ stepWorld dt gs0 =
   let gs1 = gs0 { timeAccum = timeAccum gs0 + dt }
       gs2 = gs1 { player = stepPlayer dt (inputY gs1) (player gs1) }
 
+      -- player autofire
       (mbShot, gs2b) = if inputFire gs2 then tryShoot gs2 else (Nothing, gs2)
       bulletsStart   = maybe id (:) mbShot (bullets gs2b)
 
+      -- move player bullets + trail
       bs1 = map (stepBullet dt) bulletsStart
       trailAdd = map (\b -> BulletTrail (bPos b) 0.22) bs1
-
       bs2 = filter (inBounds . bPos) bs1
+
+      -- move enemies
       es1 = map (stepEnemy dt (player gs2b)) (enemies gs2b)
       es2 = filter (inBounds . ePos) es1
+
+      -- enemy shooting (Shooter type)
+      (spawnedEB, gAfter) = spawnEnemyShots dt (player gs2b) es2 (rng gs2b)
+
+      -- move enemy bullets
+      eb0 = spawnedEB ++ enemyBullets gs2b
+      eb1 = map (stepBullet dt) eb0
+      eb2 = filter (inBounds . bPos) eb1
+      (dmgFromEB, eb3, animEB) = resolveEnemyBulletHits (player gs2b) eb2
+
+      -- player bullets vs enemies
       (es3, bs3, scDelta, animAdd) = resolveBulletHits es2 bs2
-      (dmg, es4, animAdd2) = resolvePlayerHits (player gs2b) es3
+
+      -- enemies ramming player
+      (dmgFromRam, es4, animAdd2) = resolvePlayerHits (player gs2b) es3
+
+      totalDmg = dmgFromEB + dmgFromRam
+
       gs3 = gs2b { enemies = es4
                  , bullets = bs3
-                 , anims   = tickAnims dt (anims gs2b ++ trailAdd ++ animAdd ++ animAdd2)
+                 , enemyBullets = eb3
+                 , anims   = tickAnims dt (anims gs2b ++ trailAdd ++ animAdd ++ animAdd2 ++ animEB)
                  , score   = score gs2b + scDelta
-                 , health  = max 0 (health gs2b - dmg)
+                 , health  = max 0 (health gs2b - totalDmg)
+                 , rng     = gAfter
                  }
   in spawnEnemies dt gs3
 
@@ -130,8 +156,8 @@ inBounds (Position x y) = x > -halfW - 60 && x < halfW + 60 && y > -halfH - 60 &
 tickAnims :: Float -> [Anim] -> [Anim]
 tickAnims dt = foldr step [] where
   step a acc = case a of
-    Explosion p ttl   -> let t = ttl - dt in if t > 0 then Explosion p t   : acc else acc
-    FlashHUD ttl      -> let t = ttl - dt in if t > 0 then FlashHUD t      : acc else acc
+    Explosion   p ttl -> let t = ttl - dt in if t > 0 then Explosion   p t : acc else acc
+    FlashHUD    p ttl -> let t = ttl - dt in if t > 0 then FlashHUD    p t : acc else acc
     MuzzleFlash p ttl -> let t = ttl - dt in if t > 0 then MuzzleFlash p t : acc else acc
     BulletTrail p ttl -> let t = ttl - dt in if t > 0 then BulletTrail p t : acc else acc
 
@@ -170,6 +196,25 @@ aiStep pl e = case eType e of
                  vy  = (py' - ey) * 0.6
              in e { eVel = (fst (eVel e), vy) }
   Shooter -> e
+
+spawnEnemyShots :: Float -> Player -> [Enemy] -> StdGen -> ([Bullet], StdGen)
+spawnEnemyShots dt _pl es g0 = go es g0 [] where
+  p = enemyFireRate * dt
+  go [] g acc = (reverse acc, g)
+  go (e:rest) g acc =
+    case eType e of
+      Shooter ->
+        let (r, g1) = randomR (0.0 :: Float, 1.0) g
+        in if r < p
+             then
+               let Position ex ey = ePos e
+                   muzzleOffset    = -18      
+                   pos             = Position (ex + muzzleOffset) ey
+                   vel             = (-enemyBulletSpeed, 0) 
+                   b               = Bullet pos vel
+               in go rest g1 (b:acc)
+             else go rest g1 acc
+      _ -> go rest g acc
 
 -- RNG-driven enemy creation
 generateEnemy :: StdGen -> Difficulty -> (Enemy, StdGen)
@@ -217,3 +262,12 @@ resolvePlayerHits pl = foldr step (0, [], []) where
     | hitCircle (pPos pl) playerRadius (ePos e) enemyRadius
     = (dmg+1, accE, Explosion (ePos e) 0.35 : accA)
     | otherwise = (dmg, e:accE, accA)
+
+resolveEnemyBulletHits :: Player -> [Bullet] -> (Int, [Bullet], [Anim])
+resolveEnemyBulletHits pl = foldl' step (0, [], [])
+  where
+    step (dmg, keep, anims') b =
+      if hitCircle (pPos pl) playerRadius (bPos b) bulletRadius
+        then let hitPos = pPos pl
+              in (dmg + 1, keep, FlashHUD hitPos 0.25 : anims')
+        else (dmg, b:keep, anims')

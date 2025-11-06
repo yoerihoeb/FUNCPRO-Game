@@ -53,9 +53,9 @@ data Bullet = Bullet
 
 data Anim =
     Explosion   { aPos :: Position, aTTL :: Float }
-  | FlashHUD    { aTTL :: Float }
-  | MuzzleFlash { aPos :: Position, aTTL :: Float }   -- NEW
-  | BulletTrail { aPos :: Position, aTTL :: Float }   -- NEW
+  | FlashHUD    { aPos :: Position, aTTL :: Float }
+  | MuzzleFlash { aPos :: Position, aTTL :: Float }
+  | BulletTrail { aPos :: Position, aTTL :: Float } 
   deriving (Show, Eq)
 
 -- Whole world --------------------------------------------------
@@ -64,6 +64,7 @@ data GameState = GameState
   { player        :: Player
   , enemies       :: [Enemy]
   , bullets       :: [Bullet]
+  , enemyBullets  :: [Bullet]
   , anims         :: [Anim]
   , rng           :: StdGen
   , score         :: Int
@@ -96,6 +97,12 @@ playerBaseSpeed = 320
 bulletSpeed     = 560
 cooldownSecs    = 0.18
 
+enemyBulletSpeed :: Float
+enemyBulletSpeed = 420
+
+enemyFireRate :: Float  
+enemyFireRate = 0.8
+
 enemyBaseSpeed :: Float
 enemyBaseSpeed = 160
 
@@ -110,6 +117,7 @@ initialGameState gen hsPath = GameState
   { player = Player (Position (-halfW + 80) 0) playerBaseSpeed 0
   , enemies = []
   , bullets = []
+  , enemyBullets = []
   , anims = []
   , rng = gen
   , score = 0

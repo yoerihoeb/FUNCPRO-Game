@@ -1,13 +1,11 @@
 
-name:                gloss-counter
+name:                shootem
 version:             0.2.0.0
-author:              You
-maintainer:          you@example.com
 category:            Game
 build-type:          Simple
 cabal-version:       >=1.10
 
-executable gloss-counter
+executable shootem
   main-is:             Main.hs
   build-depends:       base >= 4 && < 5,
                        gloss >= 1.13,
