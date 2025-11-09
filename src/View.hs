@@ -9,6 +9,9 @@ import Data.Maybe (mapMaybe)
 import Data.List (sortOn)
 import Data.Ord (Down(..))
 
+-- | Render the current 'GameState' to a Gloss 'Picture'.
+--   When the player is dead, also loads and overlays the top highscores from 'highScorePath'.
+--   Otherwise, no file I/O is performed.
 view :: GameState -> IO Picture
 view gs = do
   highs <- if health gs <= 0

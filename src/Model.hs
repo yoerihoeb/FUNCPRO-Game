@@ -131,5 +131,7 @@ initialGameState gen hsPath = GameState
   }
 
 -- Public constructor used by Main
+-- | Construct the initial 'GameState' with default values.
+--   Uses the provided 'StdGen' and sets the highscore file to "highscores.txt".
 initialState :: StdGen -> GameState
 initialState gen = initialGameState gen "highscores.txt"

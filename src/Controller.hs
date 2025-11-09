@@ -9,6 +9,14 @@ import Data.Maybe
 
 -- External API required by the framework ----------------------
 
+-- | Advance the game simulation by one frame.
+--   The first argument is the delta time in seconds.
+--   Behaviour:
+--   * If the player is dead, only animations tick; on the first dead frame the score
+--     is appended to 'highScorePath' exactly once (guarded by 'gameOverSaved').
+--   * Otherwise integrates movement, spawns enemies and bullets, resolves collisions,
+--     and updates RNG/time/animations.
+
 step :: Float -> GameState -> IO GameState
 step dt gs
   | health gs <= 0 =
@@ -19,6 +27,8 @@ step dt gs
   | paused gs = pure (gs { anims = tickAnims dt (anims gs) })
   | otherwise = pure (stepWorld dt gs)
 
+-- | Handle a single Gloss 'Event'.
+--   This function delegates to the pure 'inputKey' and simply lifts the result into IO.
 input :: Event -> GameState -> IO GameState
 input ev gs = pure (inputKey ev gs)
 
@@ -34,6 +44,11 @@ pointInRect (mx,my) (cx,cy,w,h) =
 
 -- Input --------------------------------------------------------
 
+-- | Pure input handler used by 'input'.
+--   Uses guards (preferred over nested conditionals) to:
+--   * Ignore pause toggles when dead,
+--   * Track continuous up/down movement via 'inputY',
+--   * Implement hold-to-fire on Space via 'inputFire' and 'tryShoot'.
 inputKey :: Event -> GameState -> GameState
 -- vertical movement
 inputKey (EventKey (SpecialKey KeyUp)    Down _ _) gs = gs { inputY =  1 }
