@@ -3,20 +3,40 @@ module View where
 
 import Graphics.Gloss
 import Model
+import qualified System.IO as IO
+import qualified Control.Exception as E
+import Data.Maybe (mapMaybe)
+import Data.List (sortOn)
+import Data.Ord (Down(..))
 
 view :: GameState -> IO Picture
-view gs = pure $ Pictures
-  [ translate 0 0 (color (greyN 0.1) (rectangleSolid screenW screenH))
-  , drawStars (timeAccum gs)
-  , drawPlayer (player gs)
-  , Pictures (map drawEnemy (enemies gs))
-  , Pictures (map drawBullet (bullets gs))
-  , Pictures (map drawEnemyBullet (enemyBullets gs))
-  , Pictures (map drawAnim (anims gs))
-  , drawHUD gs
-  , if paused gs && health gs > 0 then pausedOverlay else Blank
-  , if health gs <= 0 then gameOverOverlay (score gs) else Blank
-  ]
+view gs = do
+  highs <- if health gs <= 0
+             then loadHighscores (highScorePath gs)
+             else pure []
+  pure $ Pictures
+    [ translate 0 0 (color (greyN 0.1) (rectangleSolid screenW screenH))
+    , drawStars (timeAccum gs)
+    , drawPlayer (player gs)
+    , Pictures (map drawEnemy (enemies gs))
+    , Pictures (map drawBullet (bullets gs))
+    , Pictures (map drawEnemyBullet (enemyBullets gs))
+    , Pictures (map drawAnim (anims gs))
+    , drawHUD gs
+    , if paused gs && health gs > 0 then pausedOverlay else Blank
+    , if health gs <= 0 then gameOverOverlay (score gs) highs else Blank
+    ]
+
+-- Read, parse, and sort highscores (desc). Non-numeric lines are ignored.
+loadHighscores :: FilePath -> IO [Int]
+loadHighscores path = do
+  e <- E.try (readFile path) :: IO (Either IOError String)
+  let content = either (const "") id e
+      parseOne s = case reads s of
+        [(n,"")] -> Just n
+        _        -> Nothing
+      scores = mapMaybe parseOne (lines content)
+  pure $ take 10 $ sortOn Down scores
 
 -- Simple parallax stars based on time seed
 drawStars :: Float -> Picture
@@ -164,17 +184,28 @@ pausedOverlay = Pictures
   , translate (-120) 0 $ scale 0.3 0.3 $ color white $ text "Paused"
   ]
 
-gameOverOverlay :: Int -> Picture
-gameOverOverlay sc = Pictures
+gameOverOverlay :: Int -> [Int] -> Picture
+gameOverOverlay sc highs = Pictures
   [ Color (withAlpha 0.6 black) (rectangleSolid screenW screenH)
-  , translate (-180) 20  $ scale 0.35 0.35 $ color white $ text "Game Over"
+  , translate (-180) 20   $ scale 0.35 0.35 $ color white $ text "Game Over"
   , translate (-250) (-60) $ scale 0.18 0.18 $ color white $ text ("Final score: " ++ show sc)
+  , translate (screenW/2 - 360) (screenH/2 - 180) $ Pictures
+      (  [ scale 0.22 0.22 $ color white $ text "High Scores" ]
+      ++ zipWith drawLine [1..] highs
+      )
   , translate 0 restartBtnY $ Pictures
       [ Color (withAlpha 0.15 white) (rectangleSolid restartBtnW restartBtnH)
       , Color white $ rectangleWire restartBtnW restartBtnH
       , translate (-80) (-14) $ scale 0.18 0.18 $ color white $ text "Restart (R)"
       ]
   ]
+  where
+    drawLine :: Int -> Int -> Picture
+    drawLine i s =
+      translate 0 (fromIntegral (-(i * 28))) $
+        scale 0.18 0.18 $
+          color white $
+            text (show i ++ ". " ++ show s)
 
  -- Small drawing helpers -------------------------------------------------------
 
