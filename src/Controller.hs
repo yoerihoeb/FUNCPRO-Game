@@ -5,6 +5,7 @@ import System.Random (StdGen, randomR)
 import qualified System.IO as IO
 import Model
 import Data.List (foldl')
+import Data.Maybe
 
 -- External API required by the framework ----------------------
 
@@ -30,12 +31,6 @@ pointInRect :: (Float, Float) -> (Float, Float, Float, Float) -> Bool
 pointInRect (mx,my) (cx,cy,w,h) =
   let halfW' = w/2; halfH' = h/2
   in mx >= cx - halfW' && mx <= cx + halfW' && my >= cy - halfH' && my <= cy + halfH'
-
-normScale :: Vec2 -> Float -> Vec2
-normScale (0,0) s = (-s, 0)
-normScale (x,y) s =
-  let l = sqrt (x*x + y*y)
-  in (s*x/l, s*y/l)
 
 -- Input --------------------------------------------------------
 
@@ -121,12 +116,12 @@ stepWorld dt gs0 =
 
 spawnEnemies :: Float -> GameState -> GameState
 spawnEnemies dt gs =
-  let diff = spawnSchedule (timeAccum gs)
-      p = spawnRate diff * dt
-      (r, g1)  = randomR (0.0 :: Float, 1.0) (rng gs)
-      (e, g2)  = generateEnemy g1 diff
-  in if r < p then gs { enemies = e : enemies gs, rng = g2 }
-              else gs { rng = g2 }
+  let diff      = spawnSchedule (timeAccum gs)
+      (r, g1)   = randomR (0.0 :: Float, 1.0) (rng gs)
+      (e, g2)   = generateEnemy g1 diff
+      p         = spawnRate diff * dt
+      gs'       = gs { rng = g2 }
+  in if r < p then gs' { enemies = e : enemies gs' } else gs'
 
 -- Movement -----------------------------------------------------
 
@@ -154,12 +149,15 @@ inBounds (Position x y) = x > -halfW - 60 && x < halfW + 60 && y > -halfH - 60 &
 -- Animations ---------------------------------------------------
 
 tickAnims :: Float -> [Anim] -> [Anim]
-tickAnims dt = foldr step [] where
-  step a acc = case a of
-    Explosion   p ttl -> let t = ttl - dt in if t > 0 then Explosion   p t : acc else acc
-    FlashHUD    p ttl -> let t = ttl - dt in if t > 0 then FlashHUD    p t : acc else acc
-    MuzzleFlash p ttl -> let t = ttl - dt in if t > 0 then MuzzleFlash p t : acc else acc
-    BulletTrail p ttl -> let t = ttl - dt in if t > 0 then BulletTrail p t : acc else acc
+tickAnims dt = mapMaybe (stepOne dt)
+  where
+    stepOne d (Explosion   p ttl) = keep d ttl (Explosion   p)
+    stepOne d (FlashHUD    p ttl) = keep d ttl (FlashHUD    p)
+    stepOne d (MuzzleFlash p ttl) = keep d ttl (MuzzleFlash p)
+    stepOne d (BulletTrail p ttl) = keep d ttl (BulletTrail p)
+    keep d ttl ctor =
+      let t = ttl - d
+      in if t > 0 then Just (ctor t) else Nothing
 
 -- Shooting -----------------------------------------------------
 
